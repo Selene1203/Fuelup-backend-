@@ -57,12 +57,19 @@ export default function ReportsPage() {
   useEffect(() => {
     const fetchDropdowns = async () => {
       try {
-        const [stationsData, usersData] = await Promise.all([
-          api<ReportStation[]>("/api/reports/stations", { requiresAuth: true }),
-          api<ReportUser[]>("/api/reports/users", { requiresAuth: true }),
+        const [stationsResponse, usersResponse] = await Promise.all([
+          api<ReportStation[] | { stations: ReportStation[] }>("/api/reports/stations", { requiresAuth: true }),
+          api<ReportUser[] | { users: ReportUser[] }>("/api/reports/users", { requiresAuth: true }),
         ]);
-        setStations(stationsData);
-        setUsers(usersData);
+        // Handle different API response formats
+        const stationsArray = Array.isArray(stationsResponse) 
+          ? stationsResponse 
+          : (stationsResponse as { stations?: ReportStation[] }).stations || [];
+        const usersArray = Array.isArray(usersResponse) 
+          ? usersResponse 
+          : (usersResponse as { users?: ReportUser[] }).users || [];
+        setStations(stationsArray);
+        setUsers(usersArray);
       } catch (error) {
         toast.error("Failed to load report options");
         console.error(error);
@@ -77,11 +84,14 @@ export default function ReportsPage() {
     if (!stationId) return;
     setReportLoading(true);
     try {
-      const data = await api<FuelPriceReport[]>(
+      const data = await api<FuelPriceReport[] | { fuelPrices: FuelPriceReport[] }>(
         `/api/reports/fuel-prices/${stationId}`,
         { requiresAuth: true }
       );
-      setFuelPrices(data);
+      const fuelPricesArray = Array.isArray(data) 
+        ? data 
+        : (data as { fuelPrices?: FuelPriceReport[] }).fuelPrices || [];
+      setFuelPrices(fuelPricesArray);
     } catch (error) {
       toast.error("Failed to load fuel prices report");
       console.error(error);
@@ -94,11 +104,14 @@ export default function ReportsPage() {
     if (!stationId) return;
     setReportLoading(true);
     try {
-      const data = await api<PriceHistoryReport[]>(
+      const data = await api<PriceHistoryReport[] | { priceHistory: PriceHistoryReport[] }>(
         `/api/reports/price-history/${stationId}`,
         { requiresAuth: true }
       );
-      setPriceHistory(data);
+      const priceHistoryArray = Array.isArray(data) 
+        ? data 
+        : (data as { priceHistory?: PriceHistoryReport[] }).priceHistory || [];
+      setPriceHistory(priceHistoryArray);
     } catch (error) {
       toast.error("Failed to load price history report");
       console.error(error);
@@ -111,11 +124,14 @@ export default function ReportsPage() {
     if (!userId) return;
     setReportLoading(true);
     try {
-      const data = await api<SearchActivityReport[]>(
+      const data = await api<SearchActivityReport[] | { searchActivity: SearchActivityReport[] }>(
         `/api/reports/search-activity/${userId}`,
         { requiresAuth: true }
       );
-      setSearchActivity(data);
+      const searchActivityArray = Array.isArray(data) 
+        ? data 
+        : (data as { searchActivity?: SearchActivityReport[] }).searchActivity || [];
+      setSearchActivity(searchActivityArray);
     } catch (error) {
       toast.error("Failed to load search activity report");
       console.error(error);
@@ -197,7 +213,7 @@ export default function ReportsPage() {
                       <SelectValue placeholder="Select a station" />
                     </SelectTrigger>
                     <SelectContent>
-                      {stations.map((station) => (
+                      {Array.isArray(stations) && stations.map((station) => (
                         <SelectItem
                           key={station.station_id}
                           value={station.station_id.toString()}
@@ -210,7 +226,7 @@ export default function ReportsPage() {
 
                   {reportLoading ? (
                     <PageLoading />
-                  ) : fuelPrices.length > 0 ? (
+                  ) : Array.isArray(fuelPrices) && fuelPrices.length > 0 ? (
                     <>
                       <Table>
                         <TableHeader>
@@ -274,7 +290,7 @@ export default function ReportsPage() {
                       <SelectValue placeholder="Select a station" />
                     </SelectTrigger>
                     <SelectContent>
-                      {stations.map((station) => (
+                      {Array.isArray(stations) && stations.map((station) => (
                         <SelectItem
                           key={station.station_id}
                           value={station.station_id.toString()}
@@ -287,7 +303,7 @@ export default function ReportsPage() {
 
                   {reportLoading ? (
                     <PageLoading />
-                  ) : priceHistory.length > 0 ? (
+                  ) : Array.isArray(priceHistory) && priceHistory.length > 0 ? (
                     <>
                       <Table>
                         <TableHeader>
@@ -358,7 +374,7 @@ export default function ReportsPage() {
                       <SelectValue placeholder="Select a user" />
                     </SelectTrigger>
                     <SelectContent>
-                      {users.map((user) => (
+                      {Array.isArray(users) && users.map((user) => (
                         <SelectItem
                           key={user.user_id}
                           value={user.user_id.toString()}
@@ -371,7 +387,7 @@ export default function ReportsPage() {
 
                   {reportLoading ? (
                     <PageLoading />
-                  ) : searchActivity.length > 0 ? (
+                  ) : Array.isArray(searchActivity) && searchActivity.length > 0 ? (
                     <>
                       <Table>
                         <TableHeader>
@@ -427,7 +443,7 @@ export default function ReportsPage() {
                       <SelectValue placeholder="Select a station" />
                     </SelectTrigger>
                     <SelectContent>
-                      {stations.map((station) => (
+                      {Array.isArray(stations) && stations.map((station) => (
                         <SelectItem
                           key={station.station_id}
                           value={station.station_id.toString()}

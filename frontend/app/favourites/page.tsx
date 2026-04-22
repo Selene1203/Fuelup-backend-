@@ -62,7 +62,7 @@ export default function FavouritesPage() {
         <div className="max-w-lg mx-auto p-4">
           {loading ? (
             <PageLoading />
-          ) : favourites.length === 0 ? (
+          ) : !Array.isArray(favourites) || favourites.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Heart className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No favourites yet</p>
@@ -76,7 +76,7 @@ export default function FavouritesPage() {
                 {favourites.length} saved station
                 {favourites.length !== 1 ? "s" : ""}
               </p>
-              {favourites.map((fav) => (
+              {Array.isArray(favourites) && favourites.map((fav) => (
                 <StationCard
                   key={fav.favourite_id || fav.station_id}
                   station={{

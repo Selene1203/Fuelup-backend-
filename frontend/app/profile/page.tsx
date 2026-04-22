@@ -175,7 +175,7 @@ export default function ProfilePage() {
                     <SelectValue placeholder="Select fuel type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {fuelTypes.map((fuel) => (
+                    {Array.isArray(fuelTypes) && fuelTypes.map((fuel) => (
                       <SelectItem
                         key={fuel.fuel_id}
                         value={fuel.fuel_id.toString()}

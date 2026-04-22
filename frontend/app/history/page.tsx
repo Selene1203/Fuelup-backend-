@@ -72,7 +72,7 @@ export default function HistoryPage() {
         <div className="max-w-lg mx-auto p-4">
           {loading ? (
             <PageLoading />
-          ) : searches.length === 0 ? (
+          ) : !Array.isArray(searches) || searches.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <History className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No search history yet</p>
@@ -82,7 +82,7 @@ export default function HistoryPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {searches.map((search) => (
+              {Array.isArray(searches) && searches.map((search) => (
                 <Card key={search.search_id}>
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">

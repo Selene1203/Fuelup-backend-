@@ -269,7 +269,7 @@ export default function StationDetailPage({
         </Card>
 
         {/* Fuel Prices */}
-        {station.fuels && station.fuels.length > 0 && (
+        {station.fuels && Array.isArray(station.fuels) && station.fuels.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle>Fuel Prices</CardTitle>
@@ -284,7 +284,7 @@ export default function StationDetailPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {station.fuels.map((fuel) => (
+                  {Array.isArray(station.fuels) && station.fuels.map((fuel) => (
                     <TableRow key={fuel.fuel_id || fuel.fuel_type_id}>
                       <TableCell>
                         <span style={{ color: fuel.color_hex }}>
@@ -350,9 +350,9 @@ export default function StationDetailPage({
               </div>
             )}
 
-            {station.reviews && station.reviews.length > 0 ? (
+            {station.reviews && Array.isArray(station.reviews) && station.reviews.length > 0 ? (
               <div className="space-y-4">
-                {station.reviews.map((review) => (
+                {Array.isArray(station.reviews) && station.reviews.map((review) => (
                   <div
                     key={review.review_id}
                     className="border-b border-border pb-4 last:border-0"
