@@ -3,7 +3,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Search as SearchIcon, Map, List, Navigation } from "lucide-react";
+import {
+  Search as SearchIcon,
+  Map,
+  List,
+  Navigation,
+  Filter,
+  Fuel,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { BottomNav } from "@/components/bottom-nav";
 import { StationCard } from "@/components/station-card";
 import { PageLoading } from "@/components/loading-spinner";
@@ -21,16 +33,27 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, type FuelType, type Station, isAuthenticated } from "@/lib/api";
 
 // Dynamically import the map to avoid SSR issues with react-simple-maps
-const StationMap = dynamic(() => import("@/components/station-map").then(mod => ({ default: mod.StationMap })), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-[300px] rounded-lg bg-card border border-border flex items-center justify-center">
-      <Spinner className="h-6 w-6" />
-    </div>
-  ),
-});
+const StationMap = dynamic(
+  () =>
+    import("@/components/station-map").then((mod) => ({
+      default: mod.StationMap,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-[350px] rounded-lg bg-card border border-border flex items-center justify-center">
+        <Spinner className="h-6 w-6" />
+      </div>
+    ),
+  }
+);
 
 const COUNTRIES = ["Lesotho", "South Africa"];
+
+interface NearestStationInfo {
+  station: Station;
+  distance: number;
+}
 
 export default function SearchPage() {
   const router = useRouter();
@@ -39,38 +62,63 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [viewMode, setViewMode] = useState<"list" | "map">("list");
-  const [hasGpsPermission, setHasGpsPermission] = useState(false);
-  const [showTrackingMap, setShowTrackingMap] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "map">("map"); // Default to map view
+  const [showFilters, setShowFilters] = useState(false);
 
+  // GPS and nearby station state
+  const [hasGpsPermission, setHasGpsPermission] = useState(false);
+  const [nearestStation, setNearestStation] = useState<NearestStationInfo | null>(null);
+  const [showOnlyAvailable, setShowOnlyAvailable] = useState(false);
+  const [autoLoadedNearby, setAutoLoadedNearby] = useState(false);
+
+  // Search filters
   const [searchQuery, setSearchQuery] = useState("");
   const [fuelTypeFilter, setFuelTypeFilter] = useState<string>("");
   const [countryFilter, setCountryFilter] = useState<string>("");
-  
-  // Check GPS availability and switch to map view if GPS is active
+
+  // Check GPS availability and auto-load nearby stations
   useEffect(() => {
     if (navigator.geolocation) {
-      navigator.permissions?.query({ name: 'geolocation' }).then((result) => {
-        if (result.state === 'granted') {
-          setHasGpsPermission(true);
-        }
-        result.onchange = () => {
-          setHasGpsPermission(result.state === 'granted');
-        };
-      }).catch(() => {
-        // Permissions API not supported, try to get location anyway
-      });
+      navigator.permissions
+        ?.query({ name: "geolocation" })
+        .then((result) => {
+          if (result.state === "granted") {
+            setHasGpsPermission(true);
+            // Auto-load stations if GPS is already granted
+            if (!autoLoadedNearby) {
+              loadAllStations();
+              setAutoLoadedNearby(true);
+            }
+          }
+          result.onchange = () => {
+            const granted = result.state === "granted";
+            setHasGpsPermission(granted);
+            if (granted && !autoLoadedNearby) {
+              loadAllStations();
+              setAutoLoadedNearby(true);
+            }
+          };
+        })
+        .catch(() => {
+          // Permissions API not supported, try to load stations anyway
+          if (!autoLoadedNearby) {
+            loadAllStations();
+            setAutoLoadedNearby(true);
+          }
+        });
     }
-  }, []);
+  }, [autoLoadedNearby]);
 
+  // Load fuel types on mount
   useEffect(() => {
     const fetchFuelTypes = async () => {
       try {
-        const data = await api<{ fuels: FuelType[] }>("/api/fueltypes");
-        if (data.fuels && Array.isArray(data.fuels)) {
+        const data = await api<{ fuels: FuelType[] } | FuelType[]>("/api/fueltypes");
+        const fuelsArray = Array.isArray(data) ? data : data.fuels || [];
+        if (fuelsArray.length > 0) {
           // Deduplicate by fuel_name
-          const uniqueFuels = data.fuels.reduce((acc: FuelType[], fuel) => {
-            if (!acc.find(f => f.fuel_name === fuel.fuel_name)) {
+          const uniqueFuels = fuelsArray.reduce((acc: FuelType[], fuel) => {
+            if (!acc.find((f) => f.fuel_name === fuel.fuel_name)) {
               acc.push(fuel);
             }
             return acc;
@@ -78,14 +126,39 @@ export default function SearchPage() {
           setFuelTypes(uniqueFuels);
         }
       } catch (error) {
-        toast.error("Failed to load fuel types");
-        console.error(error);
+        console.error("Failed to load fuel types:", error);
       } finally {
         setLoading(false);
       }
     };
     fetchFuelTypes();
   }, []);
+
+  // Load all stations (for GPS-based nearby display)
+  const loadAllStations = async () => {
+    setSearching(true);
+    try {
+      // Load stations from SA and Lesotho
+      const data = await api<{ count: number; stations: Station[] } | Station[]>(
+        "/api/stations"
+      );
+      const stationsArray = Array.isArray(data) ? data : data.stations || [];
+      setStations(stationsArray);
+      setHasSearched(true);
+    } catch (error) {
+      console.error("Failed to load stations:", error);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // Handle nearest station found from map
+  const handleNearestStationFound = useCallback(
+    (station: Station, distance: number) => {
+      setNearestStation({ station, distance });
+    },
+    []
+  );
 
   const handleSearch = useCallback(async () => {
     setSearching(true);
@@ -103,8 +176,7 @@ export default function SearchPage() {
       const data = await api<{ count: number; stations: Station[] } | Station[]>(
         `/api/stations${queryString ? `?${queryString}` : ""}`
       );
-      // API returns { count, stations } or plain array
-      const stationsArray = Array.isArray(data) ? data : (data.stations || []);
+      const stationsArray = Array.isArray(data) ? data : data.stations || [];
       setStations(stationsArray);
 
       // Log search if user is authenticated
@@ -140,27 +212,48 @@ export default function SearchPage() {
     }
   };
 
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFuelTypeFilter("");
+    setCountryFilter("");
+    setShowOnlyAvailable(false);
+  };
+
+  const hasActiveFilters =
+    searchQuery || fuelTypeFilter || countryFilter || showOnlyAvailable;
+
+  // Format distance for display
+  const formatDistance = (km: number): string => {
+    if (km < 1) return `${Math.round(km * 1000)}m`;
+    return `${km.toFixed(1)}km`;
+  };
+
   if (loading) {
     return <PageLoading />;
   }
 
   return (
     <main className="min-h-screen pb-20 bg-background">
+      {/* Header */}
       <div className="sticky top-0 z-40 bg-background border-b border-border">
         <div className="max-w-lg mx-auto p-4 space-y-3">
+          {/* Title row */}
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-foreground">Find a Station</h1>
+            <div className="flex items-center gap-2">
+              <Fuel className="h-5 w-5 text-[#FF6B00]" />
+              <h1 className="text-xl font-bold text-foreground">Find Fuel</h1>
+            </div>
             <div className="flex items-center gap-1">
-              {/* GPS Tracking Button - shows map with user location */}
+              {/* Filter toggle */}
               <Button
-                variant={showTrackingMap ? "default" : "ghost"}
+                variant={showFilters ? "secondary" : "ghost"}
                 size="sm"
-                onClick={() => setShowTrackingMap(!showTrackingMap)}
-                className={showTrackingMap ? "bg-blue-500 hover:bg-blue-600 text-white" : "text-muted-foreground hover:text-foreground"}
-                title="Track my location"
+                onClick={() => setShowFilters(!showFilters)}
+                className="text-muted-foreground hover:text-foreground"
               >
-                <Navigation className="h-4 w-4" />
+                <Filter className="h-4 w-4" />
               </Button>
+              {/* View mode toggle */}
               <Button
                 variant="ghost"
                 size="sm"
@@ -182,9 +275,10 @@ export default function SearchPage() {
             </div>
           </div>
 
+          {/* Search bar */}
           <div className="flex gap-2">
             <Input
-              placeholder="Search by name or city..."
+              placeholder="Search stations..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -203,94 +297,188 @@ export default function SearchPage() {
             </Button>
           </div>
 
-          <div className="flex gap-2">
-            <Select value={fuelTypeFilter} onValueChange={setFuelTypeFilter}>
-              <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Fuel Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Fuels</SelectItem>
-                {Array.isArray(fuelTypes) && fuelTypes.map((fuel) => (
-                  <SelectItem
-                    key={fuel.fuel_id}
-                    value={fuel.fuel_id.toString()}
-                  >
-                    <span style={{ color: fuel.color_hex }}>{fuel.fuel_name}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Filters panel */}
+          {showFilters && (
+            <div className="space-y-3 pt-2 border-t border-border">
+              <div className="flex gap-2">
+                <Select value={fuelTypeFilter} onValueChange={setFuelTypeFilter}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Fuel Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Fuels</SelectItem>
+                    {Array.isArray(fuelTypes) &&
+                      fuelTypes.map((fuel) => (
+                        <SelectItem
+                          key={fuel.fuel_id}
+                          value={fuel.fuel_id.toString()}
+                        >
+                          <span style={{ color: fuel.color_hex }}>
+                            {fuel.fuel_name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
 
-            <Select value={countryFilter} onValueChange={setCountryFilter}>
-              <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Country" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Countries</SelectItem>
-                {COUNTRIES.map((country) => (
-                  <SelectItem key={country} value={country}>
-                    {country}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+                <Select value={countryFilter} onValueChange={setCountryFilter}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Countries</SelectItem>
+                    {COUNTRIES.map((country) => (
+                      <SelectItem key={country} value={country}>
+                        {country}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Availability toggle */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="available-only"
+                    checked={showOnlyAvailable}
+                    onCheckedChange={setShowOnlyAvailable}
+                  />
+                  <Label
+                    htmlFor="available-only"
+                    className="text-sm cursor-pointer"
+                  >
+                    Show only stations with fuel available
+                  </Label>
+                </div>
+                {hasActiveFilters && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearFilters}
+                    className="text-xs text-muted-foreground"
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Active filters badges */}
+          {hasActiveFilters && !showFilters && (
+            <div className="flex flex-wrap gap-1">
+              {searchQuery && (
+                <Badge variant="secondary" className="text-xs">
+                  &quot;{searchQuery}&quot;
+                </Badge>
+              )}
+              {fuelTypeFilter && fuelTypeFilter !== "all" && (
+                <Badge variant="secondary" className="text-xs">
+                  {fuelTypes.find((f) => f.fuel_id.toString() === fuelTypeFilter)
+                    ?.fuel_name || "Fuel"}
+                </Badge>
+              )}
+              {countryFilter && countryFilter !== "all" && (
+                <Badge variant="secondary" className="text-xs">
+                  {countryFilter}
+                </Badge>
+              )}
+              {showOnlyAvailable && (
+                <Badge variant="secondary" className="text-xs bg-green-500/20 text-green-600">
+                  Available Only
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Content */}
       <div className="max-w-lg mx-auto p-4">
-        {/* GPS Tracking Map - shows when user clicks the navigation button */}
-        {showTrackingMap && (
+        {/* Map View - Always shows when in map mode */}
+        {viewMode === "map" && (
           <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
-                <Navigation className="h-4 w-4 text-blue-500" />
-                GPS Tracking
-              </h2>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowTrackingMap(false)}
-                className="text-xs text-muted-foreground"
-              >
-                Hide
-              </Button>
-            </div>
             <StationMap
               stations={Array.isArray(stations) ? stations : []}
-              onStationClick={(station) => router.push(`/stations/${station.station_id}`)}
+              onStationClick={(station) =>
+                router.push(`/stations/${station.station_id}`)
+              }
               showUserLocation={true}
+              onNearestStationFound={handleNearestStationFound}
+              showOnlyAvailable={showOnlyAvailable}
+              highlightNearest={true}
+              autoCenter={true}
             />
-            <p className="text-xs text-muted-foreground mt-2 text-center">
-              Your location is shown with a blue marker. Search for stations to see them on the map.
-            </p>
           </div>
         )}
-        
-        {!hasSearched && !showTrackingMap ? (
-          <div className="text-center py-12 text-muted-foreground">
-            <SearchIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>Search for fuel stations</p>
-            <p className="text-sm">
-              Enter a name, city, or use filters to find stations
+
+        {/* Nearest Station Quick Card (only in list view) */}
+        {viewMode === "list" && nearestStation && hasGpsPermission && (
+          <Card
+            className="mb-4 border-[#FF6B00] bg-[#FF6B00]/5 cursor-pointer hover:bg-[#FF6B00]/10 transition-colors"
+            onClick={() =>
+              router.push(`/stations/${nearestStation.station.station_id}`)
+            }
+          >
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-[#FF6B00]/20">
+                  <Navigation className="h-5 w-5 text-[#FF6B00]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-[#FF6B00] font-medium">
+                    Nearest Station
+                  </p>
+                  <p className="font-semibold text-foreground truncate">
+                    {nearestStation.station.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {nearestStation.station.city}, {nearestStation.station.country}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-lg font-bold text-[#FF6B00]">
+                    {formatDistance(nearestStation.distance)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">away</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Loading/Empty/Results states */}
+        {!hasSearched && !searching ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Navigation className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p className="font-medium">Finding stations near you...</p>
+            <p className="text-sm mt-1">
+              {hasGpsPermission
+                ? "Loading nearby fuel stations"
+                : "Enable GPS to find the nearest station"}
             </p>
-            {hasGpsPermission && (
+            {!hasGpsPermission && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setShowTrackingMap(true)}
-                className="mt-4 border-blue-500 text-blue-500 hover:bg-blue-500/10"
+                onClick={loadAllStations}
+                className="mt-4 border-[#FF6B00] text-[#FF6B00] hover:bg-[#FF6B00]/10"
               >
-                <Navigation className="h-4 w-4 mr-2" />
-                Track My Location
+                <SearchIcon className="h-4 w-4 mr-2" />
+                Browse All Stations
               </Button>
             )}
           </div>
-        ) : !hasSearched && showTrackingMap ? null : searching ? (
-          <PageLoading />
+        ) : searching ? (
+          <div className="py-8">
+            <PageLoading />
+          </div>
         ) : stations.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
-            <p>No stations found</p>
+          <div className="text-center py-8 text-muted-foreground">
+            <Fuel className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p className="font-medium">No stations found</p>
             <p className="text-sm">Try adjusting your search or filters</p>
           </div>
         ) : (
@@ -298,17 +486,12 @@ export default function SearchPage() {
             <p className="text-sm text-muted-foreground">
               {stations.length} station{stations.length !== 1 ? "s" : ""} found
             </p>
-            
-            {viewMode === "map" && Array.isArray(stations) ? (
-              <StationMap
-                stations={stations}
-                onStationClick={(station) => router.push(`/stations/${station.station_id}`)}
-              />
-            ) : null}
-            
-            {Array.isArray(stations) && stations.map((station) => (
-              <StationCard key={station.station_id} station={station} />
-            ))}
+
+            {/* Station list */}
+            {Array.isArray(stations) &&
+              stations.map((station) => (
+                <StationCard key={station.station_id} station={station} />
+              ))}
           </div>
         )}
       </div>
